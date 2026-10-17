@@ -28,6 +28,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -100,14 +101,20 @@ fun AndroidZhihuMain(navController: NavHostController) {
         },
         articlePopEnterTransition = { null },
         articleContent = { article, navEntry ->
-            val viewModel: ArticleViewModel = viewModel(navEntry) {
-                ArticleViewModel(article, activity.httpClient, androidUserMessageSink(activity)) { onPause ->
-                    navEntry.lifecycle.addObserver(object : DefaultLifecycleObserver {
-                        override fun onPause(owner: LifecycleOwner) {
-                            onPause()
-                        }
-                    })
+            // 不显式传 owner：槽内页面拿到内容级 store，搬运后仍是同一个 ViewModel（旧 entry 销毁不会 clear）；
+            // 万一不在内容槽里（当前接线不会发生）则退回 NavHost 提供的 entry owner。
+            val viewModel: ArticleViewModel = viewModel {
+                ArticleViewModel(article, activity.httpClient, androidUserMessageSink(activity))
+            }
+            // 搬运会换宿主 entry，pause 回调必须挂在当前宿主上，否则旧 entry 销毁后就失联。
+            DisposableEffect(navEntry, viewModel) {
+                val observer = object : DefaultLifecycleObserver {
+                    override fun onPause(owner: LifecycleOwner) {
+                        viewModel.rememberedScrollYSync = false
+                    }
                 }
+                navEntry.lifecycle.addObserver(observer)
+                onDispose { navEntry.lifecycle.removeObserver(observer) }
             }
             ArticleScreen(article, viewModel)
         },
