@@ -79,6 +79,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -276,6 +277,10 @@ fun ZhihuMain(
         (showListDetail || navEntry?.id == detailOwnerEntryId)
     val hasOpenDetail = showDetailPane && selectedContentDestination != null
     val useSecondaryContentNavigation = showListDetail
+    // isLargeLandscape 来自 BoxWithConstraints，只在测量阶段更新；同一帧里既改窗口尺寸又切播放项时，
+    // LaunchedEffect 会拿着上一帧的模式按窄屏语义导航（把主栈顶的列表页弹掉）。归属判断必须读最新值。
+    val latestIsLargeLandscape by rememberUpdatedState(isLargeLandscape)
+    val latestUseSecondaryContentNavigation by rememberUpdatedState(useSecondaryContentNavigation)
     val detailLifecycleOwner = rememberLifecycleOwner(
         maxLifecycle = if (showListDetail || showDetailPane) Lifecycle.State.RESUMED else Lifecycle.State.CREATED,
     )
@@ -296,7 +301,9 @@ fun ZhihuMain(
     fun openReadingDestination(destination: NavDestination, onlyIfReading: Boolean = false) {
         val current = if (hasOpenDetail) selectedContentDestination else navEntry.readingDestinationOrNull()
         if (current == destination || (onlyIfReading && current == null)) return
-        val opensInDetail = useSecondaryContentNavigation && destination.isDetailPaneDestination()
+        val opensInDetail = latestIsLargeLandscape &&
+            latestUseSecondaryContentNavigation &&
+            destination.isDetailPaneDestination()
         if (hasOpenDetail) {
             if (opensInDetail) {
                 detailNavController.popBackStack()
@@ -343,6 +350,8 @@ fun ZhihuMain(
         val itemChanged = previousReadingItemKey != null && previousReadingItemKey != currentItemKey
         previousReadingItemKey = currentItemKey
         if (itemChanged && currentItem != null) {
+            // 等本帧布局落定：播放项切换可能与窗口尺寸变化同帧，归属判断要用测量后的模式。
+            withFrameNanos { }
             openReadingDestination(currentItem.toDestination(readingPlayerState.sourceId), onlyIfReading = true)
         }
     }
